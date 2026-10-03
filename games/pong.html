@@ -1,0 +1,188 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pong – games library</title>
+<link rel="stylesheet" href="../shared.css">
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>Pong</h1></div>
+<main class="game">
+  <div class="row">
+    <select id="diff">
+      <option value="0.55">Easy</option>
+      <option value="0.8" selected>Medium</option>
+      <option value="1.1">Hard</option>
+    </select>
+    <button class="btn" id="start">New match</button>
+    <span class="stat"><small>Wins</small><b id="wins">0</b></span>
+  </div>
+  <canvas id="c" width="640" height="400"></canvas>
+  <p class="help">Move with <kbd>W</kbd>/<kbd>S</kbd> or <kbd>↑</kbd>/<kbd>↓</kbd>, or drag the mouse / your finger over the court. First to 7 wins. <kbd>Space</kbd> serves and pauses.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script>
+const W = 640, H = 400, PW = 10, PH = 70, BALL = 8, WIN = 7;
+const cv = document.getElementById('c');
+const ctx = cv.getContext('2d');
+
+let player, cpu, ball, ps, cs, state, keys = {}, last, wins;
+// state: 'ready' (waiting to serve) | 'play' | 'paused' | 'over'
+
+wins = Scores.get('pong_wins') || 0;
+document.getElementById('wins').textContent = wins;
+
+function reset() {
+  player = { y: H / 2 - PH / 2 };
+  cpu = { y: H / 2 - PH / 2 };
+  ps = 0; cs = 0;
+  centerBall(1);
+  state = 'ready';
+}
+
+function centerBall(dirX) {
+  ball = { x: W / 2, y: H / 2, vx: 0, vy: 0, speed: 5, dirX };
+}
+
+function serve() {
+  const a = (Math.random() * 0.8 - 0.4);
+  ball.speed = 5;
+  ball.vx = Math.cos(a) * ball.speed * ball.dirX;
+  ball.vy = Math.sin(a) * ball.speed;
+  state = 'play';
+}
+
+function bounceOff(paddleX, paddleY, dirX) {
+  const rel = (ball.y - (paddleY + PH / 2)) / (PH / 2);          // -1 .. 1
+  const angle = Math.max(-1, Math.min(1, rel)) * (Math.PI / 3);   // up to 60°
+  ball.speed = Math.min(ball.speed + 0.4, 13);
+  ball.vx = Math.cos(angle) * ball.speed * dirX;
+  ball.vy = Math.sin(angle) * ball.speed;
+  ball.x = paddleX;
+}
+
+function update(k) {
+  const pSpeed = 6.5 * k;
+  if (keys.up) player.y -= pSpeed;
+  if (keys.down) player.y += pSpeed;
+  player.y = Math.max(0, Math.min(H - PH, player.y));
+
+  // CPU tracks the ball when it's coming its way, otherwise drifts to centre.
+  const diff = parseFloat(document.getElementById('diff').value);
+  const target = ball.vx > 0 ? ball.y - PH / 2 : H / 2 - PH / 2;
+  const maxStep = 4.2 * diff * k;
+  const delta = target - cpu.y;
+  if (Math.abs(delta) > 6) cpu.y += Math.sign(delta) * Math.min(maxStep, Math.abs(delta));
+  cpu.y = Math.max(0, Math.min(H - PH, cpu.y));
+
+  if (state !== 'play') return;
+  ball.x += ball.vx * k;
+  ball.y += ball.vy * k;
+
+  if (ball.y < BALL) { ball.y = BALL; ball.vy = Math.abs(ball.vy); }
+  if (ball.y > H - BALL) { ball.y = H - BALL; ball.vy = -Math.abs(ball.vy); }
+
+  // left (player) paddle sits at x=20..30, right (cpu) at W-30..W-20
+  if (ball.vx < 0 && ball.x - BALL <= 20 + PW && ball.x >= 20 && ball.y >= player.y - BALL && ball.y <= player.y + PH + BALL) {
+    bounceOff(20 + PW + BALL, player.y, 1);
+  } else if (ball.vx > 0 && ball.x + BALL >= W - 20 - PW && ball.x <= W - 20 && ball.y >= cpu.y - BALL && ball.y <= cpu.y + PH + BALL) {
+    bounceOff(W - 20 - PW - BALL, cpu.y, -1);
+  }
+
+  if (ball.x < -BALL) point('cpu');
+  else if (ball.x > W + BALL) point('player');
+}
+
+function point(who) {
+  if (who === 'player') ps++; else cs++;
+  if (ps >= WIN || cs >= WIN) {
+    state = 'over';
+    if (ps >= WIN) {
+      wins++;
+      Scores.submit('pong_wins', wins);
+      document.getElementById('wins').textContent = wins;
+    }
+    return;
+  }
+  centerBall(who === 'player' ? 1 : -1);   // next serve heads toward whoever just lost the point
+  state = 'ready';
+}
+
+function text(t, y, size, color) {
+  ctx.fillStyle = color;
+  ctx.font = `bold ${size}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.fillText(t.toLowerCase(), W / 2, y);
+}
+
+function draw() {
+  ctx.fillStyle = '#0a0d1a';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#2d3459';
+  for (let y = 0; y < H; y += 24) ctx.fillRect(W / 2 - 2, y, 4, 12);
+
+  ctx.fillStyle = '#6c8cff';
+  ctx.fillRect(20, player.y, PW, PH);
+  ctx.fillStyle = '#fbbf24';
+  ctx.fillRect(W - 20 - PW, cpu.y, PW, PH);
+  ctx.fillStyle = '#e8ebff';
+  ctx.beginPath();
+  ctx.arc(ball.x, ball.y, BALL, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#4b5385';
+  ctx.font = 'bold 48px system-ui';
+  ctx.textAlign = 'center';
+  ctx.fillText(ps, W / 2 - 60, 56);
+  ctx.fillText(cs, W / 2 + 60, 56);
+
+  if (state === 'ready') text('Press Space or click to serve', H - 30, 18, '#8d94c2');
+  if (state === 'paused') text('PAUSED', H / 2, 36, '#e8ebff');
+  if (state === 'over') {
+    text(ps >= WIN ? 'YOU WIN! 🎉' : 'CPU WINS', H / 2 - 4, 40, '#e8ebff');
+    text('Press Space or click for a new match', H / 2 + 28, 16, '#8d94c2');
+  }
+}
+
+function loop(t) {
+  const k = last ? Math.min((t - last) / 16.667, 3) : 1;
+  last = t;
+  if (state !== 'paused' && state !== 'over') update(k);
+  draw();
+  requestAnimationFrame(loop);
+}
+
+function primary() {
+  if (state === 'ready') serve();
+  else if (state === 'over') reset();
+  else if (state === 'play') state = 'paused';
+  else if (state === 'paused') state = 'play';
+}
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') { keys.up = true; e.preventDefault(); }
+  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') { keys.down = true; e.preventDefault(); }
+  else if (e.key === ' ') { e.preventDefault(); if (!e.repeat) primary(); }
+});
+document.addEventListener('keyup', e => {
+  if (e.key === 'ArrowUp' || e.key === 'w' || e.key === 'W') keys.up = false;
+  else if (e.key === 'ArrowDown' || e.key === 's' || e.key === 'S') keys.down = false;
+});
+
+function pointerY(clientY) {
+  const r = cv.getBoundingClientRect();
+  player.y = Math.max(0, Math.min(H - PH, (clientY - r.top) * (H / r.height) - PH / 2));
+}
+cv.addEventListener('mousemove', e => pointerY(e.clientY));
+cv.addEventListener('touchmove', e => { pointerY(e.touches[0].clientY); }, { passive: true });
+cv.addEventListener('click', primary);
+document.getElementById('start').onclick = e => { e.target.blur(); reset(); };
+document.getElementById('diff').onchange = e => e.target.blur();
+
+reset();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

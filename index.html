@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>games library</title>
+<link rel="stylesheet" href="shared.css">
+<style>
+  header.hero { text-align: center; padding: 40px 16px 10px; }
+  header.hero h1 { margin: 0; font-size: clamp(32px, 6vw, 52px); letter-spacing: -.02em; }
+  header.hero p { color: var(--muted); margin: 8px 0 0; }
+  .controls { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; padding: 18px 16px 6px; }
+  .controls input {
+    background: var(--panel); color: var(--text); border: 1px solid var(--border);
+    border-radius: 8px; padding: 9px 14px; font-size: 15px; width: min(320px, 100%); font-family: inherit;
+  }
+  .chip {
+    background: var(--panel); color: var(--muted); border: 1px solid var(--border);
+    border-radius: 99px; padding: 7px 14px; cursor: pointer; font-size: 14px; font-family: inherit;
+  }
+  .chip.on { background: var(--accent); color: #0b1030; border-color: var(--accent); font-weight: 700; }
+  .grid {
+    display: grid; gap: 16px; padding: 20px; max-width: 1100px; margin: 0 auto;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  a.card {
+    display: flex; flex-direction: column; gap: 8px; padding: 20px; text-decoration: none; color: inherit;
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    transition: transform .12s, border-color .12s, background .12s;
+  }
+  a.card:hover { transform: translateY(-3px); border-color: var(--accent); background: var(--panel2); }
+  .card .icon { font-size: 44px; line-height: 1; }
+  .card h2 { margin: 4px 0 0; font-size: 20px; }
+  .card p { margin: 0; color: var(--muted); font-size: 14px; line-height: 1.45; flex: 1; }
+  .card .meta { display: flex; justify-content: space-between; align-items: center; font-size: 12px; color: var(--muted); }
+  .tag { background: var(--bg); border-radius: 99px; padding: 2px 9px; margin-right: 4px; }
+  .best { color: var(--good); font-weight: 700; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; grid-column: 1 / -1; }
+  footer { text-align: center; color: var(--muted); font-size: 13px; padding: 20px; }
+</style>
+</head>
+<body>
+<header class="hero">
+  <h1>games library</h1>
+  <p>library of minigames.</p>
+</header>
+
+<div class="controls">
+  <input id="search" type="search" placeholder="Search games…" autocomplete="off">
+  <span id="chips" class="row"></span>
+</div>
+
+<div class="grid" id="grid"></div>
+<footer>Best scores are saved in this browser.</footer>
+
+<script src="games.js"></script>
+<script src="shared.js"></script>
+<script>
+  const grid = document.getElementById('grid');
+  const search = document.getElementById('search');
+  const chips = document.getElementById('chips');
+  let activeTag = 'all';
+
+
+  const tags = ['all', ...new Set(GAMES.flatMap(g => g.tags))];
+  tags.forEach(t => {
+    const b = document.createElement('button');
+    b.className = 'chip' + (t === activeTag ? ' on' : '');
+    b.textContent = t;
+    b.onclick = () => {
+      activeTag = t;
+      chips.querySelectorAll('.chip').forEach(c => c.classList.toggle('on', c === b));
+      render();
+    };
+    chips.appendChild(b);
+  });
+
+  function bestText(g) {
+    if (!g.best) return '';
+    const v = Scores.get(g.best.key);
+    if (v === null) return '';
+    return `${g.best.label}: <span class="best">${v}${g.best.suffix || ''}</span>`;
+  }
+
+  function render() {
+    const q = search.value.trim().toLowerCase();
+    const list = GAMES.filter(g =>
+      (activeTag === 'all' || g.tags.includes(activeTag)) &&
+      (!q || (g.title + ' ' + g.desc + ' ' + g.tags.join(' ')).toLowerCase().includes(q)));
+    grid.innerHTML = list.length ? '' : '<div class="empty">No games match.</div>';
+    list.forEach(g => {
+      const a = document.createElement('a');
+      a.className = 'card';
+      a.href = g.file;
+      a.innerHTML = `
+        <div class="icon">${g.icon}</div>
+        <h2>${g.title}</h2>
+        <p>${g.desc}</p>
+        <div class="meta">
+          <span>${g.tags.map(t => `<span class="tag">${t}</span>`).join('')}</span>
+          <span>${bestText(g)}</span>
+        </div>`;
+      grid.appendChild(a);
+    });
+  }
+
+  search.addEventListener('input', render);
+  render();
+</script>
+</body>
+</html>

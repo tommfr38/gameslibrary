@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>memory match – games library</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  #board { --size: min(440px, 94vw); width: var(--size); display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+  .card { aspect-ratio: 1; perspective: 600px; cursor: pointer; border: 0; background: none; padding: 0; }
+  .inner { position: relative; width: 100%; height: 100%; transition: transform .35s; transform-style: preserve-3d; }
+  .card.flipped .inner, .card.matched .inner { transform: rotateY(180deg); }
+  .face {
+    position: absolute; inset: 0; backface-visibility: hidden; -webkit-backface-visibility: hidden;
+    display: flex; align-items: center; justify-content: center; border-radius: 10px;
+  }
+  .back { background: linear-gradient(135deg, #3a4170, #2a2f52); border: 2px solid var(--border); font-size: 28px; color: #5a6290; }
+  .front { background: var(--panel2); border: 2px solid var(--border); transform: rotateY(180deg); font-size: calc(var(--size) / 8); }
+  .card.matched .front { background: #14532d; border-color: var(--good); }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>Memory Match</h1></div>
+<main class="game">
+  <div class="hud">
+    <div class="stat"><small>Moves</small><b id="moves">0</b></div>
+    <div class="stat"><small>Pairs</small><b id="pairs">0 / 8</b></div>
+    <div class="stat"><small>Best</small><b id="best">–</b></div>
+  </div>
+  <div class="message" id="msg"></div>
+  <div id="board"></div>
+  <button class="btn" id="again">New game</button>
+  <p class="help">Flip two cards at a time. Match all 8 pairs in as few moves as you can.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script>
+const EMOJI = ['🐶', '🐱', '🦊', '🐼', '🐸', '🦁', '🐵', '🐙', '🦄', '🐢', '🦋', '🐳'];
+const PAIRS = 8;
+const $ = id => document.getElementById(id);
+const board = $('board');
+let first, lock, moves, matched;
+
+function shuffle(a) {
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function showBest() {
+  const b = Scores.get('memory');
+  $('best').textContent = b === null ? '–' : b;
+}
+
+function newGame() {
+  const picks = shuffle(EMOJI.slice()).slice(0, PAIRS);
+  const deck = shuffle([...picks, ...picks]);
+  board.innerHTML = '';
+  deck.forEach(e => {
+    const b = document.createElement('button');
+    b.className = 'card';
+    b.dataset.e = e;
+    b.setAttribute('aria-label', 'Card');
+    b.innerHTML = `<div class="inner"><div class="face back">?</div><div class="face front">${e}</div></div>`;
+    b.onclick = () => flip(b);
+    board.appendChild(b);
+  });
+  first = null; lock = false; moves = 0; matched = 0;
+  $('moves').textContent = 0;
+  $('pairs').textContent = `0 / ${PAIRS}`;
+  $('msg').textContent = '';
+  showBest();
+}
+
+function flip(card) {
+  if (lock || card === first || card.classList.contains('matched') || card.classList.contains('flipped')) return;
+  card.classList.add('flipped');
+  if (!first) { first = card; return; }
+
+  moves++;
+  $('moves').textContent = moves;
+  const a = first, b = card;
+  first = null;
+
+  if (a.dataset.e === b.dataset.e) {
+    a.classList.replace('flipped', 'matched');
+    b.classList.replace('flipped', 'matched');
+    matched++;
+    $('pairs').textContent = `${matched} / ${PAIRS}`;
+    if (matched === PAIRS) {
+      Scores.submit('memory', moves, true);
+      showBest();
+      $('msg').textContent = `🎉 Done in ${moves} moves!`;
+    }
+  } else {
+    lock = true;
+    setTimeout(() => {
+      a.classList.remove('flipped');
+      b.classList.remove('flipped');
+      lock = false;
+    }, 800);
+  }
+}
+
+$('again').onclick = e => { e.target.blur(); newGame(); };
+newGame();
+</script>
+</body>
+</html>

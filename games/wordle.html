@@ -1,0 +1,210 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>wordle – games library</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  :root { --correct: #3f9b4f; --present: #c9a227; --absent: #3a3f5c; }
+  #board { display: grid; gap: 6px; }
+  .brow { display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; }
+  .brow.shake { animation: shake .4s; }
+  .tile {
+    width: min(58px, 15vw); height: min(58px, 15vw);
+    border: 2px solid var(--border); display: flex; align-items: center; justify-content: center;
+    font-size: 28px; font-weight: 800; border-radius: 4px;
+  }
+  .tile.filled { border-color: #5a6290; animation: pop .1s; }
+  .tile.flip { animation: flip .5s forwards; }
+  .tile.correct { background: var(--correct); border-color: var(--correct); }
+  .tile.present { background: var(--present); border-color: var(--present); }
+  .tile.absent { background: var(--absent); border-color: var(--absent); }
+  #kb { display: flex; flex-direction: column; gap: 6px; align-items: center; width: 100%; max-width: 500px; }
+  .krow { display: flex; gap: 5px; width: 100%; justify-content: center; }
+  .key {
+    flex: 1; max-width: 44px; height: 54px; border: 0; border-radius: 6px; font-weight: 700;
+    background: #4a5078; color: var(--text); cursor: pointer; font-size: 14px;
+    font-family: inherit; padding: 0;
+  }
+  .key.wide { max-width: 66px; font-size: 12px; }
+  .key.correct { background: var(--correct); }
+  .key.present { background: var(--present); }
+  .key.absent { background: var(--absent); opacity: .6; }
+  @keyframes pop { 50% { transform: scale(1.12); } }
+  @keyframes flip { 0% { transform: rotateX(0); } 50% { transform: rotateX(90deg); } 100% { transform: rotateX(0); } }
+  @keyframes shake { 20%, 60% { transform: translateX(-6px); } 40%, 80% { transform: translateX(6px); } }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>Wordle</h1></div>
+<main class="game">
+  <div class="hud">
+    <div class="stat"><small>Played</small><b id="played">0</b></div>
+    <div class="stat"><small>Wins</small><b id="wins">0</b></div>
+    <div class="stat"><small>Streak</small><b id="streak">0</b></div>
+    <div class="stat"><small>Best streak</small><b id="best">0</b></div>
+  </div>
+  <div class="message" id="msg"></div>
+  <div id="board"></div>
+  <div id="kb"></div>
+  <button class="btn secondary" id="again">New word</button>
+  <p class="help">Type or tap letters, <kbd>Enter</kbd> to submit. Green = right spot, yellow = wrong spot, grey = not in the word. Guesses must be real words.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script src="wordle-words.js"></script>
+<script>
+const WORDS = `abide about above actor acute adapt adult after again agent agree ahead alarm album alert alike alive allow alone along alter among angel anger angle angry apart apple apply arena argue arise armor array aside asset avoid awake award aware badly baker basic beach beard beast begin being below bench berry birth black blade blame blank blast blaze bless blind block blood bloom board boost booth bound brain brake brand brave bread break brick bride brief bring broad brown brush build bunch burst buyer cabin cable candy carry catch cause chain chair chalk charm chase cheap check cheek cheer chess chest chief child chill choir chose civil claim class clean clear clerk click cliff climb clock close cloth cloud coach coast color couch could count court cover crack craft crane crash crazy cream crime crisp cross crowd crown crush curve cycle daily dance death delay dense depth diary dirty doubt dozen draft drain drama drank dream dress dried drift drill drink drive eager early earth eight elite empty enemy enjoy enter entry equal error event every exact exist extra faint fairy faith false fancy fault feast fence fever fiber field fifth fifty fight final first flame flash fleet flesh float flood floor flour fluid focus force forge forth forty forum found frame fresh front frost fruit fully funny ghost giant given glass globe glory grace grade grain grand grant grape graph grasp grass great green greet grief grill group grown guard guess guest guide habit happy harsh heart heavy hello hence honey honor horse hotel house human humor ideal image imply index inner input irony issue ivory jewel joint judge juice knife knock known label labor large laser later laugh layer learn lease least leave legal lemon level light limit linen liver local logic loose lover lower loyal lucky lunch magic major maker march match maybe mayor meant medal media melon mercy merge merit metal meter might minor minus mixed model money month moral motor mount mouse mouth movie music naive nerve never newly night noble noise north novel nurse ocean offer often olive onion opera orbit order other ought outer owner paint panel paper party pasta patch pause peace pearl phase phone photo piano piece pilot pitch pizza place plain plane plant plate plaza point polar porch pound power press price pride prime print prior prize proof proud prove pulse punch pupil query quest quick quiet quite quote radar radio raise rally ranch range rapid ratio reach react ready realm rebel refer relax reply rider ridge right rigid risky rival river roast robot rocky rough round route royal rural salad sauce scale scare scene scope score scout sense serve seven shade shake shape share sharp sheep sheet shelf shell shift shine shirt shock shoot shore short shout sight silly since sixth skill sleep slice slide small smart smile smoke snake solar solid solve sorry sound south space spare speak speed spend spice spike split spoke sport staff stage stair stamp stand stare start state steak steam steel steep stick still stock stone store storm story stove strip study stuff style sugar suite sunny super sweet swift swing sword table taste teach thank theme there thick thing think third those three throw thumb tiger tight timer title toast today token tooth topic total touch tough tower trace track trade trail train treat trend trial tribe trick truck truly trust truth twice uncle under union unite unity until upper upset urban usage usual valid value video virus visit vital vivid vocal voice waste watch water weary weird whale wheat wheel where which while white whole whose width woman world worry worth would wound write wrong yacht young youth zebra`
+  .split(/\s+/);
+
+const ROWS = 6, COLS = 5;
+const KEYS = ['qwertyuiop', 'asdfghjkl', '+zxcvbnm-'];
+const boardEl = document.getElementById('board');
+const kbEl = document.getElementById('kb');
+const msgEl = document.getElementById('msg');
+
+let answer, row, guess, over, busy, tiles, keyEls = {}, keyState = {};
+
+const stats = loadStats();
+function loadStats() {
+  try { return Object.assign({ played: 0, wins: 0, streak: 0, best: 0 }, JSON.parse(localStorage.getItem('gl_wordle_stats'))); }
+  catch (e) { return { played: 0, wins: 0, streak: 0, best: 0 }; }
+}
+function saveStats() {
+  try { localStorage.setItem('gl_wordle_stats', JSON.stringify(stats)); } catch (e) {}
+  Scores.submit('wordle_streak', stats.best);
+  for (const k of ['played', 'wins', 'streak', 'best']) document.getElementById(k).textContent = stats[k];
+}
+
+function buildBoard() {
+  boardEl.innerHTML = '';
+  tiles = [];
+  for (let r = 0; r < ROWS; r++) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'brow';
+    const rowTiles = [];
+    for (let c = 0; c < COLS; c++) {
+      const t = document.createElement('div');
+      t.className = 'tile';
+      rowEl.appendChild(t);
+      rowTiles.push(t);
+    }
+    boardEl.appendChild(rowEl);
+    tiles.push(rowTiles);
+  }
+}
+
+function buildKeyboard() {
+  kbEl.innerHTML = '';
+  keyEls = {};
+  for (const line of KEYS) {
+    const rowEl = document.createElement('div');
+    rowEl.className = 'krow';
+    for (const ch of line) {
+      const b = document.createElement('button');
+      b.className = 'key';
+      if (ch === '+') { b.textContent = 'Enter'; b.classList.add('wide'); b.onclick = () => press('Enter'); }
+      else if (ch === '-') { b.textContent = '⌫'; b.classList.add('wide'); b.onclick = () => press('Backspace'); }
+      else { b.textContent = ch; b.onclick = () => press(ch); keyEls[ch] = b; }
+      rowEl.appendChild(b);
+    }
+    kbEl.appendChild(rowEl);
+  }
+}
+
+function newGame() {
+  answer = WORDS[Math.floor(Math.random() * WORDS.length)];
+  row = 0; guess = ''; over = false; busy = false; keyState = {};
+  msg('');
+  buildBoard();
+  buildKeyboard();
+  saveStats();
+}
+
+function msg(text) { msgEl.textContent = text; }
+
+function press(k) {
+  if (over || busy) return;
+  if (k === 'Enter') return submit();
+  if (k === 'Backspace') {
+    if (guess.length) { guess = guess.slice(0, -1); tiles[row][guess.length].textContent = ''; tiles[row][guess.length].classList.remove('filled'); }
+    return;
+  }
+  if (/^[a-z]$/.test(k) && guess.length < COLS) {
+    const t = tiles[row][guess.length];
+    t.textContent = k;
+    t.classList.add('filled');
+    guess += k;
+  }
+}
+
+function evaluate(g) {
+  const res = Array(COLS).fill('absent');
+  const left = {};
+  for (let i = 0; i < COLS; i++) {
+    if (g[i] === answer[i]) res[i] = 'correct';
+    else left[answer[i]] = (left[answer[i]] || 0) + 1;
+  }
+  for (let i = 0; i < COLS; i++) {
+    if (res[i] === 'correct') continue;
+    if (left[g[i]] > 0) { res[i] = 'present'; left[g[i]]--; }
+  }
+  return res;
+}
+
+function reject(text) {
+  msg(text);
+  const el = boardEl.children[row];
+  el.classList.remove('shake'); void el.offsetWidth; el.classList.add('shake');
+}
+
+function submit() {
+  if (guess.length < COLS) return reject('Not enough letters');
+  if (!VALID_GUESSES.has(guess)) return reject('Not in word list');
+  msg('');
+  busy = true;
+  const g = guess, res = evaluate(g), r = row;
+  const rank = { absent: 1, present: 2, correct: 3 };
+
+  res.forEach((state, i) => {
+    setTimeout(() => {
+      tiles[r][i].classList.add('flip');
+      setTimeout(() => tiles[r][i].classList.add(state), 250);
+    }, i * 280);
+  });
+
+  setTimeout(() => {
+    g.split('').forEach((ch, i) => {
+      if (!keyState[ch] || rank[res[i]] > rank[keyState[ch]]) {
+        keyState[ch] = res[i];
+        keyEls[ch].className = 'key ' + res[i];
+      }
+    });
+    if (g === answer) finish(true);
+    else if (r === ROWS - 1) finish(false);
+    busy = false;
+  }, COLS * 280 + 200);
+
+  row++; guess = '';
+}
+
+function finish(won) {
+  over = true;
+  stats.played++;
+  if (won) { stats.wins++; stats.streak++; stats.best = Math.max(stats.best, stats.streak); msg(['Genius!', 'Magnificent!', 'Impressive!', 'Splendid!', 'Great!', 'Phew!'][row - 1]); }
+  else { stats.streak = 0; msg('The word was ' + answer.toUpperCase()); }
+  saveStats();
+}
+
+document.addEventListener('keydown', e => {
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key === 'Enter' || e.key === 'Backspace') { e.preventDefault(); press(e.key); }
+  else if (/^[a-zA-Z]$/.test(e.key)) press(e.key.toLowerCase());
+});
+document.getElementById('again').onclick = e => { e.target.blur(); newGame(); };
+
+newGame();
+</script>
+</body>
+</html>

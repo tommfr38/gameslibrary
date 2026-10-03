@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>minesweeper – games library</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  #wrap { max-width: 100%; overflow-x: auto; padding-bottom: 6px; }
+  #field { --cs: 30px; display: grid; gap: 2px; width: max-content; margin: 0 auto; user-select: none; -webkit-user-select: none; }
+  .c {
+    width: var(--cs); height: var(--cs); display: flex; align-items: center; justify-content: center;
+    background: #3a4170; border-radius: 4px; font-weight: 800; font-size: 16px; cursor: pointer;
+  }
+  .c:hover { background: #48508a; }
+  .c.open { background: #12162b; cursor: default; }
+  .c.mine { background: #7f1d1d; }
+  .c.boom { background: #ef4444; }
+  .c.wrong { background: #78350f; }
+  .n1 { color: #60a5fa; } .n2 { color: #4ade80; } .n3 { color: #f87171; } .n4 { color: #c084fc; }
+  .n5 { color: #fb923c; } .n6 { color: #22d3ee; } .n7 { color: #e8ebff; } .n8 { color: #8d94c2; }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>Minesweeper</h1></div>
+<main class="game">
+  <div class="row">
+    <select id="level">
+      <option value="easy">Easy · 9×9 · 10 mines</option>
+      <option value="medium">Medium · 16×16 · 40 mines</option>
+      <option value="hard">Hard · 16×30 · 99 mines</option>
+    </select>
+    <button class="btn" id="again">New game</button>
+    <button class="btn secondary" id="flagmode">🚩 Flag mode</button>
+  </div>
+  <div class="hud">
+    <div class="stat"><small>Mines left</small><b id="mines">0</b></div>
+    <div class="stat"><small>Time</small><b id="time">0</b></div>
+    <div class="stat"><small>Best</small><b id="best">–</b></div>
+  </div>
+  <div class="message" id="msg"></div>
+  <div id="wrap"><div id="field"></div></div>
+  <p class="help">Click to reveal, right-click (or Flag mode on touch) to flag. Click a number whose flags are all placed to reveal its neighbours. Your first click is always safe.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script>
+const LEVELS = { easy: [9, 9, 10], medium: [16, 16, 40], hard: [16, 30, 99] };
+const $ = id => document.getElementById(id);
+const field = $('field');
+
+let R, C, M, cells, started, over, flags, opened, timer, secs, flagMode = false, levelKey;
+
+function neighbors(i) {
+  const r = Math.floor(i / C), c = i % C, out = [];
+  for (let dr = -1; dr <= 1; dr++)
+    for (let dc = -1; dc <= 1; dc++) {
+      if (!dr && !dc) continue;
+      const nr = r + dr, nc = c + dc;
+      if (nr >= 0 && nr < R && nc >= 0 && nc < C) out.push(nr * C + nc);
+    }
+  return out;
+}
+
+function showBest() {
+  const b = Scores.get('minesweeper_' + levelKey);
+  $('best').textContent = b === null ? '–' : b + 's';
+}
+
+function newGame() {
+  levelKey = $('level').value;
+  [R, C, M] = LEVELS[levelKey];
+  cells = Array.from({ length: R * C }, () => ({ mine: false, adj: 0, open: false, flag: false }));
+  started = false; over = false; flags = 0; opened = 0; secs = 0;
+  clearInterval(timer);
+  $('time').textContent = 0;
+  $('msg').textContent = '';
+  field.style.gridTemplateColumns = `repeat(${C}, var(--cs))`;
+  field.style.setProperty('--cs', C > 20 ? '28px' : '30px');
+  field.innerHTML = '';
+  for (let i = 0; i < R * C; i++) {
+    const d = document.createElement('div');
+    d.className = 'c';
+    d.dataset.i = i;
+    field.appendChild(d);
+  }
+  updateMines();
+  showBest();
+}
+
+function updateMines() { $('mines').textContent = M - flags; }
+
+function placeMines(safe) {
+  const banned = new Set([safe, ...neighbors(safe)]);
+  const pool = [];
+  for (let i = 0; i < R * C; i++) if (!banned.has(i)) pool.push(i);
+  for (let k = 0; k < M; k++) {
+    const j = k + Math.floor(Math.random() * (pool.length - k));
+    [pool[k], pool[j]] = [pool[j], pool[k]];
+    cells[pool[k]].mine = true;
+  }
+  cells.forEach((cell, i) => { cell.adj = neighbors(i).filter(n => cells[n].mine).length; });
+}
+
+function paint(i) {
+  const cell = cells[i], el = field.children[i];
+  el.className = 'c';
+  el.textContent = '';
+  if (cell.open) {
+    el.classList.add('open');
+    if (cell.adj) { el.textContent = cell.adj; el.classList.add('n' + cell.adj); }
+  } else if (cell.flag) {
+    el.textContent = '🚩';
+  }
+}
+
+function reveal(start) {
+  const stack = [start];
+  while (stack.length) {
+    const i = stack.pop(), cell = cells[i];
+    if (cell.open || cell.flag) continue;
+    cell.open = true;
+    opened++;
+    paint(i);
+    if (cell.adj === 0) neighbors(i).forEach(n => { if (!cells[n].open) stack.push(n); });
+  }
+}
+
+function lose(hit) {
+  over = true;
+  clearInterval(timer);
+  cells.forEach((cell, i) => {
+    const el = field.children[i];
+    if (cell.mine && !cell.flag) { el.className = 'c mine'; el.textContent = '💣'; }
+    else if (!cell.mine && cell.flag) { el.className = 'c wrong'; el.textContent = '❌'; }
+  });
+  field.children[hit].className = 'c boom';
+  $('msg').textContent = '💥 Boom!';
+}
+
+function win() {
+  over = true;
+  clearInterval(timer);
+  cells.forEach((cell, i) => { if (cell.mine && !cell.flag) { cell.flag = true; paint(i); } });
+  flags = M; updateMines();
+  Scores.submit('minesweeper_' + levelKey, secs, true);
+  showBest();
+  $('msg').textContent = `🎉 Cleared in ${secs}s!`;
+}
+
+function open(i) {
+  const cell = cells[i];
+  if (over || cell.flag) return;
+  if (cell.open) return chord(i);
+  if (!started) {
+    started = true;
+    placeMines(i);
+    timer = setInterval(() => { secs++; $('time').textContent = secs; }, 1000);
+  }
+  if (cell.mine) return lose(i);
+  reveal(i);
+  if (opened === R * C - M) win();
+}
+
+function chord(i) {
+  const cell = cells[i];
+  if (!cell.adj) return;
+  const nb = neighbors(i);
+  if (nb.filter(n => cells[n].flag).length !== cell.adj) return;
+  for (const n of nb) {
+    if (cells[n].flag || cells[n].open) continue;
+    if (cells[n].mine) return lose(n);
+    reveal(n);
+  }
+  if (opened === R * C - M) win();
+}
+
+function toggleFlag(i) {
+  const cell = cells[i];
+  if (over || cell.open) return;
+  cell.flag = !cell.flag;
+  flags += cell.flag ? 1 : -1;
+  paint(i);
+  updateMines();
+}
+
+field.addEventListener('click', e => {
+  const t = e.target.closest('.c');
+  if (!t) return;
+  const i = +t.dataset.i;
+  if (flagMode) toggleFlag(i); else open(i);
+});
+field.addEventListener('contextmenu', e => {
+  e.preventDefault();
+  const t = e.target.closest('.c');
+  if (t) toggleFlag(+t.dataset.i);
+});
+
+$('flagmode').onclick = e => { flagMode = !flagMode; e.target.classList.toggle('active', flagMode); e.target.blur(); };
+$('again').onclick = e => { e.target.blur(); newGame(); };
+$('level').onchange = e => { e.target.blur(); newGame(); };
+newGame();
+</script>
+</body>
+</html>

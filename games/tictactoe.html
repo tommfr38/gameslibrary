@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>tic-tac-toe – games library</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  #board { --size: min(360px, 90vw); width: var(--size); height: var(--size); display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .sq {
+    background: var(--panel); border: 2px solid var(--border); border-radius: 12px; cursor: pointer;
+    font-size: calc(var(--size) / 4); font-weight: 800; color: var(--text); font-family: inherit; padding: 0;
+  }
+  .sq:hover:not(:disabled) { background: var(--panel2); }
+  .sq:disabled { cursor: default; }
+  .sq.X { color: #6c8cff; }
+  .sq.O { color: #fbbf24; }
+  .sq.win { background: #14532d; border-color: var(--good); }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>Tic-Tac-Toe</h1></div>
+<main class="game">
+  <div class="row">
+    <select id="mode">
+      <option value="hard">vs Computer (unbeatable)</option>
+      <option value="easy">vs Computer (easy)</option>
+      <option value="2p">2 Players</option>
+    </select>
+    <button class="btn" id="again">New round</button>
+  </div>
+  <div class="hud">
+    <div class="stat"><small id="lx">X</small><b id="sx">0</b></div>
+    <div class="stat"><small>Draws</small><b id="sd">0</b></div>
+    <div class="stat"><small id="lo">O</small><b id="so">0</b></div>
+  </div>
+  <div class="message" id="msg"></div>
+  <div id="board"></div>
+  <p class="help">Get three in a row. Against the computer you play X; the starting player alternates each round. The unbeatable AI never loses, so a draw is a good result.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script>
+const LINES = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+const $ = id => document.getElementById(id);
+const boardEl = $('board');
+
+let sq, turn, over, tally, startsFirst = 'X', aiTimer;
+
+function resetTally() { tally = { X: 0, O: 0, D: 0 }; }
+resetTally();
+
+function winner(b) {
+  for (const [a, c, d] of LINES) if (b[a] && b[a] === b[c] && b[a] === b[d]) return { who: b[a], line: [a, c, d] };
+  return b.every(Boolean) ? { who: 'D', line: [] } : null;
+}
+
+function minimax(b, player, ai) {
+  const w = winner(b);
+  if (w) return w.who === ai ? 10 : w.who === 'D' ? 0 : -10;
+  let best = player === ai ? -Infinity : Infinity;
+  for (let i = 0; i < 9; i++) {
+    if (b[i]) continue;
+    b[i] = player;
+    const s = minimax(b, player === 'X' ? 'O' : 'X', ai);
+    b[i] = null;
+    best = player === ai ? Math.max(best, s) : Math.min(best, s);
+  }
+  return best;
+}
+
+function aiMove() {
+  const free = sq.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+  if ($('mode').value === 'easy' && Math.random() < 0.7) return free[Math.floor(Math.random() * free.length)];
+  // Prefer faster wins: score each move, break ties randomly.
+  let bestScore = -Infinity, moves = [];
+  for (const i of free) {
+    sq[i] = 'O';
+    const w = winner(sq);
+    // Immediate win beats everything; otherwise use full-depth minimax.
+    const s = w && w.who === 'O' ? 100 : minimax(sq, 'X', 'O');
+    sq[i] = null;
+    if (s > bestScore) { bestScore = s; moves = [i]; }
+    else if (s === bestScore) moves.push(i);
+  }
+  return moves[Math.floor(Math.random() * moves.length)];
+}
+
+function render(winLine = []) {
+  boardEl.innerHTML = '';
+  sq.forEach((v, i) => {
+    const b = document.createElement('button');
+    b.className = 'sq' + (v ? ' ' + v : '') + (winLine.includes(i) ? ' win' : '');
+    b.textContent = v || '';
+    b.disabled = over || !!v || (vsAI() && turn === 'O');
+    b.setAttribute('aria-label', `Square ${i + 1}`);
+    b.onclick = () => play(i);
+    boardEl.appendChild(b);
+  });
+  $('sx').textContent = tally.X; $('so').textContent = tally.O; $('sd').textContent = tally.D;
+}
+
+const vsAI = () => $('mode').value !== '2p';
+
+function names() {
+  $('lx').textContent = vsAI() ? 'You (X)' : 'Player X';
+  $('lo').textContent = vsAI() ? 'Computer (O)' : 'Player O';
+}
+
+function newRound(keepStarter) {
+  clearTimeout(aiTimer);
+  if (!keepStarter) startsFirst = startsFirst === 'X' ? 'O' : 'X';
+  sq = Array(9).fill(null);
+  turn = startsFirst;
+  over = false;
+  names();
+  status();
+  render();
+  maybeAI();
+}
+
+function status() {
+  if (over) return;
+  $('msg').textContent = vsAI() ? (turn === 'X' ? 'Your turn' : 'Computer thinking…') : `Player ${turn}'s turn`;
+}
+
+function play(i) {
+  if (over || sq[i]) return;
+  sq[i] = turn;
+  const w = winner(sq);
+  if (w) {
+    over = true;
+    tally[w.who]++;
+    $('msg').textContent = w.who === 'D' ? "It's a draw!" :
+      vsAI() ? (w.who === 'X' ? '🎉 You win!' : '🤖 Computer wins') : `🎉 Player ${w.who} wins!`;
+    render(w.line);
+    return;
+  }
+  turn = turn === 'X' ? 'O' : 'X';
+  status();
+  render();
+  maybeAI();
+}
+
+function maybeAI() {
+  if (!vsAI() || turn !== 'O' || over) return;
+  aiTimer = setTimeout(() => play(aiMove()), 350);
+}
+
+$('again').onclick = e => { e.target.blur(); newRound(false); };
+$('mode').onchange = e => { e.target.blur(); resetTally(); startsFirst = 'X'; newRound(true); };
+newRound(true);
+</script>
+</body>
+</html>

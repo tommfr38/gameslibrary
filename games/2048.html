@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>2048 – games library</title>
+<link rel="stylesheet" href="../shared.css">
+<style>
+  #grid {
+    --size: min(440px, 92vw);
+    width: var(--size); height: var(--size);
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 10px;
+    background: #2a2f52; border-radius: 12px; position: relative; touch-action: none;
+  }
+  .t {
+    border-radius: 8px; display: flex; align-items: center; justify-content: center;
+    font-weight: 800; font-size: calc(var(--size) / 9); background: #343a63; color: #1c1f3a;
+  }
+  .t.new { animation: pop .18s; }
+  .t.merged { animation: bump .18s; }
+  .t[data-v="2"] { background: #eee4da; }
+  .t[data-v="4"] { background: #ede0c8; }
+  .t[data-v="8"] { background: #f2b179; color: #fff; }
+  .t[data-v="16"] { background: #f59563; color: #fff; }
+  .t[data-v="32"] { background: #f67c5f; color: #fff; }
+  .t[data-v="64"] { background: #f65e3b; color: #fff; }
+  .t[data-v="128"] { background: #edcf72; color: #fff; font-size: calc(var(--size) / 11); }
+  .t[data-v="256"] { background: #edcc61; color: #fff; font-size: calc(var(--size) / 11); }
+  .t[data-v="512"] { background: #edc850; color: #fff; font-size: calc(var(--size) / 11); }
+  .t[data-v="1024"] { background: #edc53f; color: #fff; font-size: calc(var(--size) / 14); }
+  .t[data-v="2048"] { background: #edc22e; color: #fff; font-size: calc(var(--size) / 14); box-shadow: 0 0 20px #edc22e; }
+  .t.big { background: #3c3a32; color: #fff; font-size: calc(var(--size) / 14); }
+  @keyframes pop { from { transform: scale(.2); } to { transform: scale(1); } }
+  @keyframes bump { 50% { transform: scale(1.15); } }
+</style>
+</head>
+<body>
+<div class="topbar"><a href="../index.html">← Library</a><h1>2048</h1></div>
+<main class="game">
+  <div class="hud">
+    <div class="stat"><small>Score</small><b id="score">0</b></div>
+    <div class="stat"><small>Best</small><b id="best">0</b></div>
+  </div>
+  <div class="message" id="msg"></div>
+  <div id="grid"></div>
+  <button class="btn" id="again">New game</button>
+  <p class="help">Arrow keys / <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or swipe. Equal tiles merge when they collide. Reach 2048, then keep going for a high score.</p>
+</main>
+
+<script src="../shared.js"></script>
+<script>
+const N = 4;
+const gridEl = document.getElementById('grid');
+const $ = id => document.getElementById(id);
+let cells, score, best, over, won, fresh, merged;
+
+best = Scores.get('2048') || 0;
+
+function newGame() {
+  cells = Array(N * N).fill(0);
+  score = 0; over = false; won = false;
+  fresh = new Set(); merged = new Set();
+  addTile(); addTile();
+  $('msg').textContent = '';
+  render();
+}
+
+function addTile() {
+  const empty = cells.map((v, i) => v ? -1 : i).filter(i => i >= 0);
+  if (!empty.length) return;
+  const i = empty[Math.floor(Math.random() * empty.length)];
+  cells[i] = Math.random() < 0.9 ? 2 : 4;
+  fresh.add(i);
+}
+
+// Returns the 4 board indices for line `n`, ordered from the wall the tiles slide toward.
+function line(dir, n) {
+  const idx = [];
+  for (let k = 0; k < N; k++) {
+    if (dir === 'left') idx.push(n * N + k);
+    else if (dir === 'right') idx.push(n * N + (N - 1 - k));
+    else if (dir === 'up') idx.push(k * N + n);
+    else idx.push((N - 1 - k) * N + n);
+  }
+  return idx;
+}
+
+function move(dir) {
+  if (over) return;
+  let changed = false;
+  fresh = new Set(); merged = new Set();
+  for (let n = 0; n < N; n++) {
+    const idx = line(dir, n);
+    const vals = idx.map(i => cells[i]).filter(Boolean);
+    const out = [], outMerged = [];
+    for (let k = 0; k < vals.length; k++) {
+      if (vals[k] === vals[k + 1]) {
+        out.push(vals[k] * 2);
+        outMerged.push(true);
+        score += vals[k] * 2;
+        if (vals[k] * 2 === 2048 && !won) { won = true; $('msg').textContent = '🎉 You made 2048! Keep going…'; }
+        k++;
+      } else {
+        out.push(vals[k]);
+        outMerged.push(false);
+      }
+    }
+    while (out.length < N) { out.push(0); outMerged.push(false); }
+    idx.forEach((boardIdx, k) => {
+      if (cells[boardIdx] !== out[k]) changed = true;
+      cells[boardIdx] = out[k];
+      if (outMerged[k]) merged.add(boardIdx);
+    });
+  }
+  if (!changed) return;
+  addTile();
+  if (!canMove()) {
+    over = true;
+    $('msg').textContent = 'Game over!';
+  }
+  best = Scores.submit('2048', score);
+  render();
+}
+
+function canMove() {
+  if (cells.includes(0)) return true;
+  for (let r = 0; r < N; r++)
+    for (let c = 0; c < N; c++) {
+      const v = cells[r * N + c];
+      if (c + 1 < N && cells[r * N + c + 1] === v) return true;
+      if (r + 1 < N && cells[(r + 1) * N + c] === v) return true;
+    }
+  return false;
+}
+
+function render() {
+  gridEl.innerHTML = '';
+  cells.forEach((v, i) => {
+    const d = document.createElement('div');
+    d.className = 't' + (v > 2048 ? ' big' : '') + (fresh.has(i) ? ' new' : '') + (merged.has(i) ? ' merged' : '');
+    if (v) { d.textContent = v; d.dataset.v = v; }
+    gridEl.appendChild(d);
+  });
+  $('score').textContent = score;
+  $('best').textContent = best || 0;
+}
+
+const KEYS = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'up', w: 'up', ArrowDown: 'down', s: 'down' };
+document.addEventListener('keydown', e => {
+  const d = KEYS[e.key] || KEYS[e.key.toLowerCase()];
+  if (d) { e.preventDefault(); move(d); }
+});
+
+let sx, sy;
+gridEl.addEventListener('touchstart', e => { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }, { passive: true });
+gridEl.addEventListener('touchend', e => {
+  const dx = e.changedTouches[0].clientX - sx, dy = e.changedTouches[0].clientY - sy;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 24) return;
+  if (Math.abs(dx) > Math.abs(dy)) move(dx > 0 ? 'right' : 'left'); else move(dy > 0 ? 'down' : 'up');
+});
+
+$('again').onclick = e => { e.target.blur(); newGame(); };
+newGame();
+</script>
+</body>
+</html>
